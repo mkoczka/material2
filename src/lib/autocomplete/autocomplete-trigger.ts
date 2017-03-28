@@ -1,14 +1,14 @@
 import {
-    AfterContentInit,
-    Directive,
-    ElementRef,
-    forwardRef,
-    Host,
-    Input,
-    NgZone,
-    Optional,
-    OnDestroy,
-    ViewContainerRef,
+  Directive,
+  ElementRef,
+  forwardRef,
+  Host,
+  Input,
+  NgZone,
+  Optional,
+  OnDestroy,
+  ViewContainerRef,
+  Renderer,
 } from '@angular/core';
 import {ControlValueAccessor, NG_VALUE_ACCESSOR} from '@angular/forms';
 import {Overlay, OverlayRef, OverlayState, TemplatePortal} from '../core';
@@ -60,7 +60,7 @@ export const MD_AUTOCOMPLETE_VALUE_ACCESSOR: any = {
     '[attr.aria-expanded]': 'panelOpen.toString()',
     '[attr.aria-owns]': 'autocomplete?.id',
     '(focus)': 'openPanel()',
-    '(blur)': '_handleBlur($event.relatedTarget?.tagName)',
+    '(blur)': '_onTouched()',
     '(input)': '_handleInput($event.target.value)',
     '(keydown)': '_handleKeydown($event)',
   },
@@ -78,8 +78,11 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
   private _keyManager: ActiveDescendantKeyManager;
   private _positionStrategy: ConnectedPositionStrategy;
 
-  /** Stream of blur events that should close the panel. */
-  private _blurStream = new Subject<any>();
+  /** Stream of click events that should close the panel. */
+  private _outsideClickStream = new Subject<any>();
+
+  /** Keeps track of the function that allows us to remove the `document` click listener. */
+  private _unbindGlobalListener: Function;
 
   /** View -> model callback called when value changes */
   _onChange = (value: any) => {};
@@ -101,7 +104,7 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
   }
 
   constructor(private _element: ElementRef, private _overlay: Overlay,
-              private _viewContainerRef: ViewContainerRef,
+              private _renderer: Renderer, private _viewContainerRef: ViewContainerRef,
               @Optional() private _dir: Dir, private _zone: NgZone,
               @Optional() @Host() private _inputContainer: MdInputContainer) {}
 
@@ -135,6 +138,16 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
 
     this._panelOpen = true;
     this._floatPlaceholder('always');
+
+    if (!this._unbindGlobalListener) {
+      this._unbindGlobalListener = this._renderer.listenGlobal('document', 'click',
+          (event: MouseEvent) => {
+            if (!this._inputContainer._elementRef.nativeElement.contains(event.target) &&
+                !this._overlayRef.overlayElement.contains(event.target as HTMLElement)) {
+              this._outsideClickStream.next(null);
+            }
+          });
+    }
   }
 
   /** Closes the autocomplete suggestion panel. */
@@ -145,6 +158,11 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
 
     this._panelOpen = false;
     this._floatPlaceholder('auto');
+
+    if (this._unbindGlobalListener) {
+      this._unbindGlobalListener();
+      this._unbindGlobalListener = null;
+    }
   }
 
   /**
@@ -153,9 +171,9 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
    */
   get panelClosingActions(): Observable<MdOptionSelectEvent> {
     return Observable.merge(
-        ...this.optionSelections,
-        this._blurStream.asObservable(),
-        this._keyManager.tabOut
+        this.optionSelections,
+        this.autocomplete._keyManager.tabOut,
+        this._outsideClickStream
     );
   }
 
@@ -216,15 +234,6 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
   _handleInput(value: string): void {
     this._onChange(value);
     this.openPanel();
-  }
-
-  _handleBlur(newlyFocusedTag: string): void {
-    this._onTouched();
-
-    // Only emit blur event if the new focus is *not* on an option.
-    if (newlyFocusedTag !== 'MD-OPTION') {
-      this._blurStream.next(null);
-    }
   }
 
   /**
@@ -290,7 +299,7 @@ export class MdAutocompleteTrigger implements AfterContentInit, ControlValueAcce
    * stemmed from the user.
    */
   private _setValueAndClose(event: MdOptionSelectEvent | null): void {
-    if (event) {
+     if (event && event.source) {
       this._setTriggerValue(event.source.value);
       this._onChange(event.source.value);
     }

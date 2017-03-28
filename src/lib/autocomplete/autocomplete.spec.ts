@@ -87,13 +87,12 @@ describe('MdAutocomplete', () => {
           .toContain('California', `Expected panel to display when opened programmatically.`);
     });
 
-    it('should close the panel when blurred', async(() => {
+    it('should close the panel when input loses focus', async(() => {
       dispatchEvent('focus', input);
       fixture.detectChanges();
 
       fixture.whenStable().then(() => {
-        dispatchEvent('blur', input);
-        fixture.detectChanges();
+        dispatchEvent('click', document);
 
         expect(fixture.componentInstance.trigger.panelOpen)
             .toBe(false, `Expected clicking outside the panel to set its state to closed.`);
