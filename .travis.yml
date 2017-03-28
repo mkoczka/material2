@@ -6,7 +6,7 @@ node_js:
 
 branches:
   only:
-  - master
+  - ie-autocomplete-click
 
 env:
   global:
